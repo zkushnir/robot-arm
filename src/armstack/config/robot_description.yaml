@@ -1,0 +1,7 @@
+links:
+  L1_mm: 120.0
+  L2_mm: 120.0
+
+serial:
+  arduino_port: "COM5"
+  arduino_baud: 115200

@@ -1,0 +1,18 @@
+[project]
+name = "armstack"
+version = "0.1.0"
+description = "Robot arm control stack (IK + GUI + drivers + perception + planning)"
+requires-python = ">=3.10"
+dependencies = [
+  "numpy",
+  "pyserial",
+  "PySide6",
+  "pyyaml",
+]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
