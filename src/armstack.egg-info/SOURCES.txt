@@ -7,10 +7,10 @@ src/armstack.egg-info/SOURCES.txt
 src/armstack.egg-info/dependency_links.txt
 src/armstack.egg-info/requires.txt
 src/armstack.egg-info/top_level.txt
-src/core/__init__.py
-src/core/config.py
-src/drivers/__init__.py
-src/drivers/arduino_stepper.py
-src/kinematics/__init__.py
-src/kinematics/planar_2link.py
-src/ui/gui_qt.py
+src/armstack/core/__init__.py
+src/armstack/core/config.py
+src/armstack/drivers/__init__.py
+src/armstack/drivers/arduino_stepper.py
+src/armstack/kinematics/__init__.py
+src/armstack/kinematics/planar_2link.py
+src/armstack/ui/gui_qt.py

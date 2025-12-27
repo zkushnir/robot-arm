@@ -36,8 +36,8 @@ class ArduinoStepperDriver:
             out.append(raw.decode("utf-8", errors="replace").strip())
         return out
 
-    def move_joints_deg(self, base, shoulder, elbow, speed_deg_s=60.0):
-        self.send_line(f"MOVE {base:.3f} {shoulder:.3f} {elbow:.3f} {speed_deg_s:.3f}")
+    def move_joints_deg(self, base: float, shoulder: float, elbow: float, speed: float = 60.0):
+        self.send_line(f"MOVE {base:.3f} {shoulder:.3f} {elbow:.3f} {speed:.3f}")
 
     def stop(self):
         self.send_line("STOP")
