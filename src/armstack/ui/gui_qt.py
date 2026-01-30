@@ -1,4 +1,3 @@
-from __future__ import annotations
 import math
 
 # Support both PySide6 and PyQt5

@@ -1,5 +1,5 @@
-from __future__ import annotations
 import time
+from typing import Optional
 import serial
 
 class ArduinoStepperDriver:
@@ -7,7 +7,7 @@ class ArduinoStepperDriver:
         self.port = port
         self.baud = baud
         self.timeout = timeout
-        self.ser: serial.Serial | None = None
+        self.ser: Optional[serial.Serial] = None
 
     def connect(self):
         self.ser = serial.Serial(self.port, baudrate=self.baud, timeout=self.timeout)
