@@ -1,12 +1,21 @@
 from __future__ import annotations
 import math
 
-from PySide6.QtCore import Qt, QPointF, QRectF, Signal
-from PySide6.QtGui import QPainter, QPen, QColor, QBrush, QPainterPath
-from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel,
-    QSlider, QDoubleSpinBox, QPushButton, QTextEdit, QGroupBox, QSpinBox, QDial
-)
+# Support both PySide6 and PyQt5
+try:
+    from PySide6.QtCore import Qt, QPointF, QRectF, Signal
+    from PySide6.QtGui import QPainter, QPen, QColor, QBrush, QPainterPath
+    from PySide6.QtWidgets import (
+        QWidget, QVBoxLayout, QHBoxLayout, QLabel,
+        QSlider, QDoubleSpinBox, QPushButton, QTextEdit, QGroupBox, QSpinBox, QDial
+    )
+except ImportError:
+    from PyQt5.QtCore import Qt, QPointF, QRectF, pyqtSignal as Signal
+    from PyQt5.QtGui import QPainter, QPen, QColor, QBrush, QPainterPath
+    from PyQt5.QtWidgets import (
+        QWidget, QVBoxLayout, QHBoxLayout, QLabel,
+        QSlider, QDoubleSpinBox, QPushButton, QTextEdit, QGroupBox, QSpinBox, QDial
+    )
 
 from armstack.core.config import RobotConfig
 from armstack.kinematics.planar_2link import ik_2link_planar

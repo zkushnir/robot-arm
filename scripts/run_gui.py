@@ -1,7 +1,12 @@
 from pathlib import Path
 import sys
 
-from PySide6.QtWidgets import QApplication
+# Support both PySide6 and PyQt5
+try:
+    from PySide6.QtWidgets import QApplication
+except ImportError:
+    from PyQt5.QtWidgets import QApplication
+
 from armstack.core.config import load_robot_config
 from armstack.ui.gui_qt import ArmGUI
 

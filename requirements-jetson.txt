@@ -1,0 +1,5 @@
+# Jetson-compatible requirements (ARM/older Python versions)
+numpy>=1.19.0
+pyserial>=3.5
+PySide6>=6.2.0
+pyyaml>=5.4
