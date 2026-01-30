@@ -17,3 +17,6 @@ Thumbs.db
 # Data
 data/logs/
 data/recordings/
+
+# Claude Code
+.claude/
