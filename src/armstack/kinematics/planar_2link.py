@@ -1,12 +1,11 @@
 import math
-from dataclasses import dataclass
 
-@dataclass
 class IKResult:
-    ok: bool
-    theta1_rad: float = 0.0
-    theta2_rad: float = 0.0
-    message: str = ""
+    def __init__(self, ok: bool, theta1_rad: float = 0.0, theta2_rad: float = 0.0, message: str = ""):
+        self.ok = ok
+        self.theta1_rad = theta1_rad
+        self.theta2_rad = theta2_rad
+        self.message = message
 
 def ik_2link_planar(x: float, y: float, L1: float, L2: float, elbow_up: bool = True) -> IKResult:
     r2 = x*x + y*y
