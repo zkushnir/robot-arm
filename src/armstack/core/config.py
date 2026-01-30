@@ -1,11 +1,10 @@
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Union
 import yaml
 
-@dataclass
 class RobotConfig:
-    raw: dict
+    def __init__(self, raw: dict):
+        self.raw = raw
 
 def load_robot_config(path: Union[str, Path]) -> RobotConfig:
     p = Path(path)
