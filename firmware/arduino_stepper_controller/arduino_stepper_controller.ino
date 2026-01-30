@@ -1,39 +1,54 @@
-#include <Dynamixel2Arduino.h>
-#include <actuator.h>
-
 /*******************************************************
- * 3-STEPPER ARM CONTROL (SERIAL MENU) + PYTHON API
- * - Serial-only control (no buttons, no toggle switch, no encoder)
- * - Adds Motor 3
- * - Keeps the same step/dir/en method of control
- * - Keeps speed control EXACTLY the same way (min_delay_us)
+ * 3-STEPPER ARM CONTROL (UNO-SRAM SAFE) + PYTHON API
  *
- * Added Python API commands:
- *   MOVE a0 a1 a2 v   (angles in deg, v = min_delay_us)
- *   GET              (prints: STATE a0 a1 a2)
- *   STOP             (disables all motors)
- *   SPEEDALL v       (sets min_delay_us for all motors)
+ * Commands (case-insensitive):
+ *   MOVE a0 a1 a2 v        (deg, deg, deg, min_delay_us)
+ *   GET                   -> STATE a0 a1 a2 s0 s1 s2
+ *   STOP                  -> disables all motors
+ *   SPEEDALL v
+ *   ZEROALL
+ *   ZERO m
+ *   HOMEALL [v]
+ *   HOME m [v]
+ *   LIMITS m min max
+ *   LIMITSALL min0 max0 min1 max1 min2 max2
  *******************************************************/
 
+#include <Arduino.h>
+#include <stdlib.h>
+#include <math.h>
+
+struct MotorPins {
+  int stepPin;
+  int dirPin;
+  int enPin;
+};
 /**************** PIN LAYOUT ****************/
 // Motor 1
-const int STEP1_PIN = 5;
+const int STEP1_PIN = 13;
 const int DIR1_PIN  = 12;
-const int EN1_PIN   = 8;
+const int EN1_PIN   = 11;
 
 // Motor 2
-const int STEP2_PIN = 9;
-const int DIR2_PIN  = 10;
-const int EN2_PIN   = 11;
+const int STEP2_PIN = 10;
+const int DIR2_PIN  = 9;
+const int EN2_PIN   = 8;
 
 // Motor 3
 const int STEP3_PIN = 2;
 const int DIR3_PIN  = 3;
 const int EN3_PIN   = 4;
 
+static const uint8_t NUM_MOTORS = 3;
+
 /**************** CONFIG (MECHANICS) ****************/
-const long STEPS_PER_REV = 16000;  // adjust for your hardware
-const float DEG_PER_STEP = 360.0f / (float)STEPS_PER_REV;
+const long STEPS_PER_REV_M[NUM_MOTORS] = {
+  16000,   // Motor 1: start with 2x (fix factor-of-2)
+  16000,   // Motor 2
+  16000    // Motor 3
+};
+
+inline float degPerStep(uint8_t i) { return 360.0f / (float)STEPS_PER_REV_M[i]; }
 
 /**************** CONFIG (MOTION PROFILE) ****************/
 const int ACCEL_STEPS_DEFAULT = 150;
@@ -43,36 +58,32 @@ const unsigned int START_DELAY_US_DEFAULT = 650;
 const unsigned int MIN_DELAY_US_DEFAULT   = 350;
 
 /**************** INTERNAL STATE ****************/
-static const uint8_t NUM_MOTORS = 3;
-
-long stepPos[NUM_MOTORS] = {0, 0, 0};
+long stepPos[NUM_MOTORS]         = {0, 0, 0};
 float angleOffsetDeg[NUM_MOTORS] = {0.0f, 0.0f, 0.0f};
-bool motorEnabled[NUM_MOTORS] = {false, false, false};
+bool motorEnabled[NUM_MOTORS]    = {false, false, false};
 
 unsigned int startDelayUs[NUM_MOTORS] = {START_DELAY_US_DEFAULT, START_DELAY_US_DEFAULT, START_DELAY_US_DEFAULT};
 unsigned int minDelayUs[NUM_MOTORS]   = {MIN_DELAY_US_DEFAULT,   MIN_DELAY_US_DEFAULT,   MIN_DELAY_US_DEFAULT};
 int accelSteps[NUM_MOTORS]            = {ACCEL_STEPS_DEFAULT,     ACCEL_STEPS_DEFAULT,     ACCEL_STEPS_DEFAULT};
 int decelSteps[NUM_MOTORS]            = {DECEL_STEPS_DEFAULT,     DECEL_STEPS_DEFAULT,     DECEL_STEPS_DEFAULT};
 
-/**************** HELPERS: motor pin lookup ****************/
-struct MotorPins {
-  int stepPin;
-  int dirPin;
-  int enPin;
-};
+/**************** SAFETY LIMITS ****************/
+bool limitsEnabled[NUM_MOTORS] = {true, true, true};
+float minLimitDeg[NUM_MOTORS]  = {-180.0f, -180.0f, -180.0f};
+float maxLimitDeg[NUM_MOTORS]  = { 180.0f,  180.0f,  180.0f};
 
-MotorPins getPins(uint8_t motorIdx0) {
-  switch (motorIdx0) {
-    case 0: return {STEP1_PIN, DIR1_PIN, EN1_PIN};
-    case 1: return {STEP2_PIN, DIR2_PIN, EN2_PIN};
-    default:return {STEP3_PIN, DIR3_PIN, EN3_PIN};
-  }
+/**************** Helpers ****************/
+
+MotorPins getPins(uint8_t i) {
+  if (i == 0) return {STEP1_PIN, DIR1_PIN, EN1_PIN};
+  if (i == 1) return {STEP2_PIN, DIR2_PIN, EN2_PIN};
+  return {STEP3_PIN, DIR3_PIN, EN3_PIN};
 }
 
 bool validMotorNumber(int m1) { return (m1 >= 1 && m1 <= 3); }
 uint8_t idx0(int m1) { return (uint8_t)(m1 - 1); }
 
-/**************** INTERNAL: compute delay for trapezoid ****************/
+/**************** Motion ramp ****************/
 inline unsigned int rampDelayForIndex(int i, int total, int accel, int decel,
                                       unsigned int startDly, unsigned int minDly) {
   if (accel < 1) accel = 1;
@@ -99,23 +110,23 @@ inline unsigned int rampDelayForIndex(int i, int total, int accel, int decel,
   return minDly;
 }
 
-/**************** ENABLE / DISABLE ****************/
-void enableMotor(uint8_t motorIdx0) {
-  MotorPins p = getPins(motorIdx0);
+/**************** Enable / Disable ****************/
+void enableMotor(uint8_t i) {
+  MotorPins p = getPins(i);
   digitalWrite(p.enPin, LOW);
-  motorEnabled[motorIdx0] = true;
+  motorEnabled[i] = true;
 }
 
-void disableMotor(uint8_t motorIdx0) {
-  MotorPins p = getPins(motorIdx0);
+void disableMotor(uint8_t i) {
+  MotorPins p = getPins(i);
   digitalWrite(p.enPin, HIGH);
-  motorEnabled[motorIdx0] = false;
+  motorEnabled[i] = false;
 }
 
 void enableAll()  { for (uint8_t i=0;i<NUM_MOTORS;i++) enableMotor(i); }
 void disableAll() { for (uint8_t i=0;i<NUM_MOTORS;i++) disableMotor(i); }
 
-/**************** LOW-LEVEL STEPPING ****************/
+/**************** Low-level stepping ****************/
 inline void pulseStepPin(int stepPin, unsigned int dly) {
   digitalWrite(stepPin, HIGH);
   delayMicroseconds(dly);
@@ -123,154 +134,131 @@ inline void pulseStepPin(int stepPin, unsigned int dly) {
   delayMicroseconds(dly);
 }
 
-void moveSteps(uint8_t motorIdx0, long deltaSteps) {
+void moveSteps(uint8_t i, long deltaSteps) {
   if (deltaSteps == 0) return;
 
-  if (!motorEnabled[motorIdx0]) {
-    Serial.print("Motor "); Serial.print(motorIdx0 + 1);
-    Serial.println(" is disabled. Use: on <m>  (or on all)");
+  if (!motorEnabled[i]) {
+    Serial.print(F("ERR motor disabled M"));
+    Serial.println(i + 1);
     return;
   }
 
-  MotorPins p = getPins(motorIdx0);
-
+  MotorPins p = getPins(i);
   bool forward = (deltaSteps > 0);
   long steps = labs(deltaSteps);
 
   digitalWrite(p.dirPin, forward ? HIGH : LOW);
 
-  unsigned int sD = startDelayUs[motorIdx0];
-  unsigned int mD = minDelayUs[motorIdx0];
-  int aS = accelSteps[motorIdx0];
-  int dS = decelSteps[motorIdx0];
+  unsigned int sD = startDelayUs[i];
+  unsigned int mD = minDelayUs[i];
+  int aS = accelSteps[i];
+  int dS = decelSteps[i];
 
   if (aS > (int)steps) aS = (int)steps;
   if (dS > (int)steps) dS = (int)steps;
 
-  for (long i = 0; i < steps; i++) {
-    unsigned int dly = rampDelayForIndex((int)i, (int)steps, aS, dS, sD, mD);
+  for (long k = 0; k < steps; k++) {
+    unsigned int dly = rampDelayForIndex((int)k, (int)steps, aS, dS, sD, mD);
     pulseStepPin(p.stepPin, dly);
   }
 
-  stepPos[motorIdx0] += (forward ? steps : -steps);
+  stepPos[i] += (forward ? steps : -steps);
 }
 
-/**************** ANGLE API ****************/
-float getAngleDeg(uint8_t motorIdx0) {
-  return (float)stepPos[motorIdx0] * DEG_PER_STEP + angleOffsetDeg[motorIdx0];
+/**************** Angle API ****************/
+float getAngleDeg(uint8_t i) {
+  return (float)stepPos[i] * degPerStep(i) + angleOffsetDeg[i];
 }
 
-void setCurrentAngleDeg(uint8_t motorIdx0, float realAngleDeg) {
-  angleOffsetDeg[motorIdx0] = realAngleDeg - ((float)stepPos[motorIdx0] * DEG_PER_STEP);
+void setCurrentAngleDeg(uint8_t i, float realDeg) {
+  angleOffsetDeg[i] = realDeg - ((float)stepPos[i] * degPerStep(i));
 }
 
-void goToAngleDeg(uint8_t motorIdx0, float targetAngleDeg) {
-  float desiredStepsF = (targetAngleDeg - angleOffsetDeg[motorIdx0]) / DEG_PER_STEP;
+bool withinLimits(uint8_t i, float targetDeg) {
+  if (!limitsEnabled[i]) return true;
+  return (targetDeg >= minLimitDeg[i] && targetDeg <= maxLimitDeg[i]);
+}
+
+void goToAngleDeg(uint8_t i, float targetDeg) {
+  if (!withinLimits(i, targetDeg)) {
+    Serial.print(F("ERR LIMITS M")); Serial.print(i + 1);
+    Serial.print(F(" target=")); Serial.print(targetDeg, 3);
+    Serial.print(F(" allowed=[")); Serial.print(minLimitDeg[i], 3);
+    Serial.print(F(",")); Serial.print(maxLimitDeg[i], 3);
+    Serial.println(F("]"));
+    return;
+  }
+
+  float desiredStepsF = (targetDeg - angleOffsetDeg[i]) / degPerStep(i);
   long desiredSteps = lroundf(desiredStepsF);
-  long delta = desiredSteps - stepPos[motorIdx0];
-
-  Serial.print("Motor "); Serial.print(motorIdx0 + 1);
-  Serial.print(" target "); Serial.print(targetAngleDeg, 3);
-  Serial.print(" deg -> move "); Serial.print(delta);
-  Serial.println(" steps");
-
-  moveSteps(motorIdx0, delta);
+  long delta = desiredSteps - stepPos[i];
+  moveSteps(i, delta);
 }
 
-/**************** SPEED CONTROL ****************/
-void setMotorSpeedDelay(uint8_t motorIdx0, unsigned int newMinDelayUs) {
-  if (newMinDelayUs < 80)  newMinDelayUs = 80;
+/**************** Speed control ****************/
+void setMotorSpeedDelay(uint8_t i, unsigned int newMinDelayUs) {
+  if (newMinDelayUs < 80)   newMinDelayUs = 80;
   if (newMinDelayUs > 5000) newMinDelayUs = 5000;
 
-  minDelayUs[motorIdx0] = newMinDelayUs;
-
-  if (startDelayUs[motorIdx0] < minDelayUs[motorIdx0]) {
-    startDelayUs[motorIdx0] = minDelayUs[motorIdx0];
-  }
+  minDelayUs[i] = newMinDelayUs;
+  if (startDelayUs[i] < minDelayUs[i]) startDelayUs[i] = minDelayUs[i];
 }
 
-void setAllSpeedDelay(unsigned int newMinDelayUs) {
-  for (uint8_t i=0;i<NUM_MOTORS;i++) setMotorSpeedDelay(i, newMinDelayUs);
+void setAllSpeedDelay(unsigned int v) {
+  for (uint8_t i=0;i<NUM_MOTORS;i++) setMotorSpeedDelay(i, v);
 }
 
-/**************** SERIAL MENU ****************/
-void printMenu() {
-  Serial.println();
-  Serial.println("=== ARM SERIAL MENU ===");
-  Serial.println("help");
-  Serial.println("on all | on <m>");
-  Serial.println("off all | off <m>");
-  Serial.println("set <m> <angle_deg>          -> move motor m to angle");
-  Serial.println("get <m>                      -> print motor m angle");
-  Serial.println("set_current <m> <real_deg>   -> calibrate: set current reported angle = real_deg");
-  Serial.println("speed <m> <min_delay_us>     -> change motor speed (lower = faster)");
-  Serial.println("speedall <min_delay_us>      -> set speed for all motors");
-  Serial.println("status                       -> print enable/speed/angles");
-  Serial.println();
-  Serial.println("Python API:");
-  Serial.println("MOVE a0 a1 a2 v              -> move all motors (v=min_delay_us)");
-  Serial.println("GET                          -> prints: STATE a0 a1 a2");
-  Serial.println("STOP                         -> disables all motors");
-  Serial.println("=======================");
+/**************** ZERO / HOME ****************/
+void zeroMotor(uint8_t i) { setCurrentAngleDeg(i, 0.0f); }
+void zeroAll() { for (uint8_t i=0;i<NUM_MOTORS;i++) zeroMotor(i); }
+
+void homeMotor(uint8_t i) { goToAngleDeg(i, 0.0f); }
+void homeAll() { homeMotor(0); homeMotor(1); homeMotor(2); }
+
+/**************** State output ****************/
+void printStateLine() {
+  Serial.print(F("STATE "));
+  Serial.print(getAngleDeg(0), 3); Serial.print(' ');
+  Serial.print(getAngleDeg(1), 3); Serial.print(' ');
+  Serial.print(getAngleDeg(2), 3); Serial.print(' ');
+  Serial.print(stepPos[0]); Serial.print(' ');
+  Serial.print(stepPos[1]); Serial.print(' ');
+  Serial.print(stepPos[2]);
   Serial.println();
 }
 
-void printStatus() {
-  Serial.println();
-  Serial.println("--- STATUS ---");
-  for (uint8_t i = 0; i < NUM_MOTORS; i++) {
-    Serial.print("M"); Serial.print(i + 1);
-    Serial.print(" | enabled: "); Serial.print(motorEnabled[i] ? "YES" : "NO");
-    Serial.print(" | angle: "); Serial.print(getAngleDeg(i), 3); Serial.print(" deg");
-    Serial.print(" | stepPos: "); Serial.print(stepPos[i]);
-    Serial.print(" | minDelayUs: "); Serial.print(minDelayUs[i]);
-    Serial.print(" | startDelayUs: "); Serial.print(startDelayUs[i]);
-    Serial.println();
-  }
-  Serial.println("-------------");
-  Serial.println();
+/**************** Small command parser (no String) ****************/
+static char lineBuf[96];
+static uint8_t lineLen = 0;
+
+inline void toLowerInPlace(char *s) {
+  for (; *s; ++s) if (*s >= 'A' && *s <= 'Z') *s = *s - 'A' + 'a';
 }
 
-int tokenize(const String& line, String tokens[], int maxTok) {
+int splitTokens(char *buf, char *tok[], int maxTok) {
   int n = 0;
-  int start = 0;
-  while (start < (int)line.length() && n < maxTok) {
-    while (start < (int)line.length() && line[start] == ' ') start++;
-    if (start >= (int)line.length()) break;
-
-    int end = line.indexOf(' ', start);
-    if (end == -1) end = line.length();
-
-    tokens[n++] = line.substring(start, end);
-    start = end + 1;
+  char *p = strtok(buf, " \t\r\n");
+  while (p && n < maxTok) {
+    tok[n++] = p;
+    p = strtok(NULL, " \t\r\n");
   }
   return n;
 }
 
-void handleCommand(String line) {
-  line.trim();
-  if (line.length() == 0) return;
+void handleLine(char *buf) {
+  toLowerInPlace(buf);
 
-  // NOTE: We intentionally do NOT use sscanf. We parse with tokenize().
-  String lower = line;
-  lower.toLowerCase();
+  char *tok[10];
+  int n = splitTokens(buf, tok, 10);
+  if (n <= 0) return;
 
-  String t[8];
-  int n = tokenize(lower, t, 8);
-
-  // === PYTHON API ===
-  if (t[0] == "move") {
-    // MOVE a0 a1 a2 v
-    // v = min_delay_us (lower=faster)
-    if (n < 5) {
-      Serial.println("ERR MOVE usage: MOVE a0 a1 a2 v");
-      return;
-    }
-
-    float a0 = t[1].toFloat();
-    float a1 = t[2].toFloat();
-    float a2 = t[3].toFloat();
-    unsigned int v = (unsigned int)t[4].toInt();
+  // Python API + menu unified
+  if (!strcmp(tok[0], "move")) {
+    if (n < 5) { Serial.println(F("ERR MOVE usage: MOVE a0 a1 a2 v")); return; }
+    float a0 = atof(tok[1]);
+    float a1 = atof(tok[2]);
+    float a2 = atof(tok[3]);
+    unsigned int v = (unsigned int)atoi(tok[4]);
 
     enableAll();
     setAllSpeedDelay(v);
@@ -279,115 +267,103 @@ void handleCommand(String line) {
     goToAngleDeg(1, a1);
     goToAngleDeg(2, a2);
 
-    Serial.println("OK");
+    Serial.println(F("OK"));
     return;
   }
 
-  if (t[0] == "get" && n == 1) {
-    // GET -> STATE a0 a1 a2
-    Serial.print("STATE ");
-    Serial.print(getAngleDeg(0), 3); Serial.print(" ");
-    Serial.print(getAngleDeg(1), 3); Serial.print(" ");
-    Serial.print(getAngleDeg(2), 3);
-    Serial.println();
+  if (!strcmp(tok[0], "get") && n == 1) {
+    printStateLine();
     return;
   }
 
-  if (t[0] == "stop" && n == 1) {
+  if (!strcmp(tok[0], "stop") && n == 1) {
     disableAll();
-    Serial.println("OK");
+    Serial.println(F("OK"));
     return;
   }
 
-  // === existing menu ===
-  // Use the LOWERCASED token list for comparisons, but preserve your original behavior otherwise.
-
-  if (t[0] == "help") { printMenu(); return; }
-  if (t[0] == "status") { printStatus(); return; }
-
-  if (t[0] == "on") {
-    if (n < 2) { Serial.println("Usage: on all | on <m>"); return; }
-    if (t[1] == "all") { enableAll(); Serial.println("All motors enabled."); }
-    else {
-      int m = t[1].toInt();
-      if (!validMotorNumber(m)) { Serial.println("Motor must be 1..3"); return; }
-      enableMotor(idx0(m));
-      Serial.print("Motor "); Serial.print(m); Serial.println(" enabled.");
-    }
+  if (!strcmp(tok[0], "speedall") && n == 2) {
+    setAllSpeedDelay((unsigned int)atoi(tok[1]));
+    Serial.println(F("OK"));
     return;
   }
 
-  if (t[0] == "off") {
-    if (n < 2) { Serial.println("Usage: off all | off <m>"); return; }
-    if (t[1] == "all") { disableAll(); Serial.println("All motors disabled."); }
-    else {
-      int m = t[1].toInt();
-      if (!validMotorNumber(m)) { Serial.println("Motor must be 1..3"); return; }
-      disableMotor(idx0(m));
-      Serial.print("Motor "); Serial.print(m); Serial.println(" disabled.");
-    }
+  if (!strcmp(tok[0], "zeroall") && n == 1) {
+    zeroAll();
+    Serial.println(F("OK"));
     return;
   }
 
-  if (t[0] == "get") {
-    if (n < 2) { Serial.println("Usage: get <m>"); return; }
-    int m = t[1].toInt();
-    if (!validMotorNumber(m)) { Serial.println("Motor must be 1..3"); return; }
+  if (!strcmp(tok[0], "homeall")) {
+    if (n == 2) setAllSpeedDelay((unsigned int)atoi(tok[1]));
+    enableAll();
+    homeAll();
+    Serial.println(F("OK"));
+    return;
+  }
+
+  if (!strcmp(tok[0], "zero") && n == 2) {
+    int m = atoi(tok[1]);
+    if (!validMotorNumber(m)) { Serial.println(F("ERR motor must be 1..3")); return; }
+    zeroMotor(idx0(m));
+    Serial.println(F("OK"));
+    return;
+  }
+
+  if (!strcmp(tok[0], "home")) {
+    if (n < 2) { Serial.println(F("ERR usage: home <m> [v]")); return; }
+    int m = atoi(tok[1]);
+    if (!validMotorNumber(m)) { Serial.println(F("ERR motor must be 1..3")); return; }
     uint8_t i = idx0(m);
-    Serial.print("Motor "); Serial.print(m);
-    Serial.print(" angle = "); Serial.print(getAngleDeg(i), 3);
-    Serial.println(" deg");
+    if (n == 3) setMotorSpeedDelay(i, (unsigned int)atoi(tok[2]));
+    enableMotor(i);
+    homeMotor(i);
+    Serial.println(F("OK"));
     return;
   }
 
-  if (t[0] == "set_current") {
-    if (n < 3) { Serial.println("Usage: set_current <m> <real_deg>"); return; }
-    int m = t[1].toInt();
-    if (!validMotorNumber(m)) { Serial.println("Motor must be 1..3"); return; }
-    float realDeg = t[2].toFloat();
-    setCurrentAngleDeg(idx0(m), realDeg);
-    Serial.print("Motor "); Serial.print(m);
-    Serial.print(" calibrated. Now angle = ");
-    Serial.print(getAngleDeg(idx0(m)), 3);
-    Serial.println(" deg");
+  if (!strcmp(tok[0], "limits")) {
+    if (n < 4) { Serial.println(F("ERR usage: limits <m> <min_deg> <max_deg>")); return; }
+    int m = atoi(tok[1]);
+    if (!validMotorNumber(m)) { Serial.println(F("ERR motor must be 1..3")); return; }
+    uint8_t i = idx0(m);
+    minLimitDeg[i] = atof(tok[2]);
+    maxLimitDeg[i] = atof(tok[3]);
+    limitsEnabled[i] = true;
+    Serial.println(F("OK"));
     return;
   }
 
-  if (t[0] == "set") {
-    if (n < 3) { Serial.println("Usage: set <m> <angle_deg>"); return; }
-    int m = t[1].toInt();
-    if (!validMotorNumber(m)) { Serial.println("Motor must be 1..3"); return; }
-    float targetDeg = t[2].toFloat();
-    goToAngleDeg(idx0(m), targetDeg);
-    Serial.print("Done. Motor "); Serial.print(m);
-    Serial.print(" angle now = "); Serial.print(getAngleDeg(idx0(m)), 3);
-    Serial.println(" deg");
+  if (!strcmp(tok[0], "limitsall")) {
+    if (n < 7) { Serial.println(F("ERR usage: limitsall min0 max0 min1 max1 min2 max2")); return; }
+    minLimitDeg[0] = atof(tok[1]); maxLimitDeg[0] = atof(tok[2]);
+    minLimitDeg[1] = atof(tok[3]); maxLimitDeg[1] = atof(tok[4]);
+    minLimitDeg[2] = atof(tok[5]); maxLimitDeg[2] = atof(tok[6]);
+    limitsEnabled[0] = limitsEnabled[1] = limitsEnabled[2] = true;
+    Serial.println(F("OK"));
     return;
   }
 
-  if (t[0] == "speed") {
-    if (n < 3) { Serial.println("Usage: speed <m> <min_delay_us>"); return; }
-    int m = t[1].toInt();
-    if (!validMotorNumber(m)) { Serial.println("Motor must be 1..3"); return; }
-    unsigned int d = (unsigned int)t[2].toInt();
-    setMotorSpeedDelay(idx0(m), d);
-    Serial.print("Motor "); Serial.print(m);
-    Serial.print(" minDelayUs set to "); Serial.println(minDelayUs[idx0(m)]);
+  // legacy single-motor commands (optional)
+  if (!strcmp(tok[0], "set") && n >= 3) {
+    int m = atoi(tok[1]);
+    float target = atof(tok[2]);
+    if (!validMotorNumber(m)) { Serial.println(F("ERR motor must be 1..3")); return; }
+    enableMotor(idx0(m));
+    goToAngleDeg(idx0(m), target);
+    Serial.println(F("OK"));
     return;
   }
 
-  if (t[0] == "speedall") {
-    if (n < 2) { Serial.println("Usage: speedall <min_delay_us>"); return; }
-    unsigned int d = (unsigned int)t[1].toInt();
-    setAllSpeedDelay(d);
-    Serial.print("All motors minDelayUs set to "); Serial.println(d);
+  if (!strcmp(tok[0], "status")) {
+    printStateLine();
     return;
   }
 
-  Serial.println("Unknown command. Type: help");
+  Serial.println(F("ERR unknown"));
 }
 
-/**************** SETUP ****************/
+/**************** SETUP / LOOP ****************/
 void setup() {
   Serial.begin(115200);
   delay(200);
@@ -397,16 +373,25 @@ void setup() {
   pinMode(STEP3_PIN, OUTPUT); pinMode(DIR3_PIN, OUTPUT); pinMode(EN3_PIN, OUTPUT);
 
   disableAll();
-
-  Serial.println("3-stepper arm controller ready.");
-  Serial.println("Type 'help' to see commands.");
-  printMenu();
+  Serial.println(F("3-stepper arm controller ready."));
 }
 
-/**************** LOOP ****************/
 void loop() {
-  if (Serial.available()) {
-    String line = Serial.readStringUntil('\n');
-    handleCommand(line);
+  while (Serial.available()) {
+    char c = (char)Serial.read();
+    if (c == '\n' || c == '\r') {
+      if (lineLen > 0) {
+        lineBuf[lineLen] = '\0';
+        handleLine(lineBuf);
+        lineLen = 0;
+      }
+    } else {
+      if (lineLen < sizeof(lineBuf) - 1) {
+        lineBuf[lineLen++] = c;
+      } else {
+        // overflow: reset line
+        lineLen = 0;
+      }
+    }
   }
 }

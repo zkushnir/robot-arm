@@ -3,5 +3,5 @@ links:
   L2_mm: 120.0
 
 serial:
-  arduino_port: "COM5"
+  arduino_port: "COM7"
   arduino_baud: 115200

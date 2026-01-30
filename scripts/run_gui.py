@@ -11,7 +11,7 @@ def main():
 
     app = QApplication(sys.argv)
     w = ArmGUI(cfg)
-    w.resize(1200, 320)
+    w.resize(1400, 800)
     w.show()
     sys.exit(app.exec())
 

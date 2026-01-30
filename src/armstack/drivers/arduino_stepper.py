@@ -41,3 +41,15 @@ class ArduinoStepperDriver:
 
     def stop(self):
         self.send_line("STOP")
+
+    def home_all(self, speed_deg_s: float = 60.0):
+        """Move all motors to 0 degrees (home position)"""
+        self.send_line(f"HOMEALL {speed_deg_s:.3f}")
+
+    def zero_all(self):
+        """Reset all motor positions to 0 (set current position as 0)"""
+        self.send_line("ZEROALL")
+
+    def get_state(self):
+        """Request current state from Arduino"""
+        self.send_line("GET")
