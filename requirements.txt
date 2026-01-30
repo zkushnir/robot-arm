@@ -1,0 +1,12 @@
+# Robot Arm Control Stack Dependencies
+# Install with: pip install -r requirements.txt
+
+numpy>=1.24.0
+pyserial>=3.5
+PySide6>=6.6.0
+pyyaml>=6.0
+
+# For development
+# pytest>=7.4.0
+# black>=23.0.0
+# ruff>=0.1.0
