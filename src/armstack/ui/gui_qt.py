@@ -6,14 +6,14 @@ try:
     from PySide6.QtGui import QPainter, QPen, QColor, QBrush, QPainterPath
     from PySide6.QtWidgets import (
         QWidget, QVBoxLayout, QHBoxLayout, QLabel,
-        QSlider, QDoubleSpinBox, QPushButton, QTextEdit, QGroupBox, QSpinBox, QDial
+        QSlider, QDoubleSpinBox, QPushButton, QTextEdit, QGroupBox, QSpinBox, QDial, QComboBox
     )
 except ImportError:
     from PyQt5.QtCore import Qt, QPointF, QRectF, pyqtSignal as Signal
     from PyQt5.QtGui import QPainter, QPen, QColor, QBrush, QPainterPath
     from PyQt5.QtWidgets import (
         QWidget, QVBoxLayout, QHBoxLayout, QLabel,
-        QSlider, QDoubleSpinBox, QPushButton, QTextEdit, QGroupBox, QSpinBox, QDial
+        QSlider, QDoubleSpinBox, QPushButton, QTextEdit, QGroupBox, QSpinBox, QDial, QComboBox
     )
 
 from armstack.core.config import RobotConfig
@@ -355,24 +355,97 @@ class ArmGUI(QWidget):
             QDial {
                 background-color: #1a1a1a;
             }
+            QComboBox {
+                background-color: #1a1a1a;
+                border: 2px solid #a020f0;
+                border-radius: 4px;
+                padding: 4px;
+                color: #d896ff;
+            }
+            QComboBox:hover {
+                border-color: #d896ff;
+            }
+            QComboBox::drop-down {
+                border-left: 1px solid #a020f0;
+                background-color: #2a2a2a;
+            }
+            QComboBox::down-arrow {
+                image: none;
+                border-left: 4px solid transparent;
+                border-right: 4px solid transparent;
+                border-top: 4px solid #a020f0;
+            }
+            QComboBox QAbstractItemView {
+                background-color: #1a1a1a;
+                border: 2px solid #a020f0;
+                selection-background-color: #a020f0;
+                selection-color: #0a0a0a;
+                color: #d896ff;
+            }
         """)
 
     def _create_connection_section(self):
         group = QGroupBox("🔌 Connection")
         layout = QHBoxLayout()
 
-        self.status_label = QLabel(f"⚪ Disconnected - Port: {self.port}")
+        self.status_label = QLabel(f"⚪ Disconnected")
         self.status_label.setStyleSheet("font-size: 12pt; font-weight: bold;")
+
+        # Port selection dropdown
+        port_label = QLabel("Port:")
+        self.port_combo = QComboBox()
+        self.port_combo.setMinimumWidth(150)
+        self._populate_ports()
+        self.port_combo.currentTextChanged.connect(self._on_port_changed)
+
+        # Refresh ports button
+        refresh_btn = QPushButton("🔄")
+        refresh_btn.setMaximumWidth(40)
+        refresh_btn.clicked.connect(self._populate_ports)
+        refresh_btn.setToolTip("Refresh port list")
 
         self.connect_btn = QPushButton("🔗 Connect Arduino")
         self.connect_btn.clicked.connect(self.connect_arduino)
 
         layout.addWidget(self.status_label)
+        layout.addWidget(port_label)
+        layout.addWidget(self.port_combo)
+        layout.addWidget(refresh_btn)
         layout.addWidget(self.connect_btn)
         layout.addStretch()
 
         group.setLayout(layout)
         return group
+
+    def _populate_ports(self):
+        """Populate the port dropdown with available serial ports"""
+        import serial.tools.list_ports
+
+        current_port = self.port_combo.currentText() if hasattr(self, 'port_combo') else self.port
+        self.port_combo.clear()
+
+        # Get available ports
+        ports = serial.tools.list_ports.comports()
+        port_list = [port.device for port in sorted(ports)]
+
+        if not port_list:
+            port_list = [self.port]  # Add configured port as fallback
+
+        self.port_combo.addItems(port_list)
+
+        # Try to select the previously selected port
+        if current_port in port_list:
+            self.port_combo.setCurrentText(current_port)
+        elif self.port in port_list:
+            self.port_combo.setCurrentText(self.port)
+
+        self.write(f"📡 Found {len(port_list)} serial port(s)")
+
+    def _on_port_changed(self, new_port):
+        """Handle port selection change"""
+        if new_port:
+            self.port = new_port
+            self.write(f"🔧 Port changed to: {new_port}")
 
     def _create_angle_control_section(self):
         group = QGroupBox("🎯 Direct Motor Angle Control")
@@ -545,17 +618,20 @@ class ArmGUI(QWidget):
             self.write("⚠️ Already connected.")
             return
         try:
+            # Reinitialize driver with selected port
+            self.driver = ArduinoStepperDriver(self.port, self.baud)
             self.driver.connect()
             self.connected = True
             self.write(f"✅ Connected: {self.port} @ {self.baud}")
-            self.status_label.setText(f"🟢 Connected - Port: {self.port}")
+            self.status_label.setText(f"🟢 Connected - {self.port}")
             self.connect_btn.setText("✅ Connected")
             self.connect_btn.setEnabled(False)
+            self.port_combo.setEnabled(False)
             for ln in self.driver.read_lines(10):
                 self.write(f"🤖 ARD: {ln}")
         except Exception as e:
             self.write(f"❌ Connect failed: {e}")
-            self.status_label.setText(f"🔴 Connection Failed - Port: {self.port}")
+            self.status_label.setText(f"🔴 Connection Failed - {self.port}")
 
     def send_angles(self):
         if not self.connected:
