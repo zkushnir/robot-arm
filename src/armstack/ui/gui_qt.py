@@ -287,13 +287,13 @@ class ArmGUI(QWidget):
         keyboard_help = self._create_keyboard_help()
         left_layout.addWidget(keyboard_help)
 
-        content_layout.addLayout(left_layout, 1)
+        content_layout.addLayout(left_layout, 2)
 
-        # Right side: visualizations
+        # Right side: visualizations (3x the space of controls)
         viz_layout = QVBoxLayout()
         viz_layout.addWidget(self.side_view)
         viz_layout.addWidget(self.top_view)
-        content_layout.addLayout(viz_layout, 1)
+        content_layout.addLayout(viz_layout, 5)
 
         main_layout.addLayout(content_layout)
 
@@ -308,6 +308,11 @@ class ArmGUI(QWidget):
         main_layout.addWidget(log_group)
 
         self.setLayout(main_layout)
+
+        # Enable keyboard focus for keyboard controls
+        self.setFocusPolicy(Qt.StrongFocus)
+        self.setFocus()
+
         self.write("🚀 KushBot ready. Click 'Connect Arduino' when plugged in.")
         self.write("⌨️ Use arrow keys + W/S for keyboard control after connecting")
 
@@ -419,19 +424,19 @@ class ArmGUI(QWidget):
         # Main title
         title = QLabel("⚡ KUSHBOT ⚡")
         title.setStyleSheet("""
-            font-size: 32pt;
+            font-size: 28pt;
             font-weight: bold;
             color: #a020f0;
             background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
                 stop:0 #a020f0, stop:0.5 #d896ff, stop:1 #a020f0);
             -webkit-background-clip: text;
-            padding: 10px;
+            padding: 5px;
         """)
         title.setAlignment(Qt.AlignCenter)
 
         # Subtitle
         subtitle = QLabel("3-DOF Robot Arm Control System")
-        subtitle.setStyleSheet("font-size: 12pt; color: #d896ff;")
+        subtitle.setStyleSheet("font-size: 10pt; color: #d896ff;")
         subtitle.setAlignment(Qt.AlignCenter)
 
         layout.addWidget(title)
@@ -453,14 +458,15 @@ class ArmGUI(QWidget):
 
         for label in [self.ee_x_display, self.ee_y_display, self.ee_z_display]:
             label.setStyleSheet("""
-                font-size: 14pt;
+                font-size: 11pt;
                 font-weight: bold;
                 color: #00ff00;
                 background-color: #0f0f0f;
                 border: 2px solid #a020f0;
                 border-radius: 4px;
-                padding: 8px;
+                padding: 6px;
             """)
+            label.setAlignment(Qt.AlignCenter)
             pos_layout.addWidget(label)
 
         layout.addLayout(pos_layout)
@@ -870,32 +876,38 @@ class ArmGUI(QWidget):
 
     def _execute_keyboard_move(self, x: float, y: float, z: float):
         """Execute immediate movement to target position"""
-        # Calculate distance in XY plane
-        r = math.sqrt(x*x + y*y)
+        try:
+            # Calculate distance in XY plane
+            r = math.sqrt(x*x + y*y)
 
-        # Calculate base angle
-        base_deg = rad2deg(math.atan2(y, x))
+            # Calculate base angle
+            base_deg = rad2deg(math.atan2(y, x))
 
-        # Use IK for 2D arm in vertical plane
-        result = ik_2link_planar(r, z, self.L1, self.L2, elbow_up=True)
+            # Use IK for 2D arm in vertical plane
+            result = ik_2link_planar(r, z, self.L1, self.L2, elbow_up=True)
 
-        if not result.ok:
-            self.write(f"❌ Target unreachable: {result.message}")
-            return
+            if not result.ok:
+                self.write(f"❌ Target unreachable: {result.message}")
+                return
 
-        shoulder_deg = rad2deg(result.theta1_rad) - 90  # Subtract 90 since 0 is vertical
-        elbow_deg = rad2deg(result.theta2_rad)
+            shoulder_deg = rad2deg(result.theta1_rad) - 90  # Subtract 90 since 0 is vertical
+            elbow_deg = rad2deg(result.theta2_rad)
 
-        # Send command immediately to robot
-        speed = float(self.speed_in.value())
+            # Send command immediately to robot
+            speed = float(self.speed_in.value())
 
-        # Negate base and elbow for correct motor direction
-        self.driver.move_joints_deg(-base_deg, shoulder_deg, -elbow_deg, speed)
+            self.write(f"🎮 Moving: Base={base_deg:.1f}°, Shoulder={shoulder_deg:.1f}°, Elbow={elbow_deg:.1f}° @ {speed:.0f}°/s")
 
-        # Update visualization (dials) to match
-        self.base_dial.setValue(-int(base_deg))
-        self.shoulder_dial.setValue(-int(shoulder_deg))
-        self.elbow_dial.setValue(-int(elbow_deg))
+            # Negate base and elbow for correct motor direction
+            self.driver.move_joints_deg(-base_deg, shoulder_deg, -elbow_deg, speed)
+
+            # Update visualization (dials) to match
+            self.base_dial.setValue(-int(base_deg))
+            self.shoulder_dial.setValue(-int(shoulder_deg))
+            self.elbow_dial.setValue(-int(elbow_deg))
+
+        except Exception as e:
+            self.write(f"❌ Keyboard move failed: {e}")
 
     def connect_arduino(self):
         if self.connected:
