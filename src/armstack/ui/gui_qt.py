@@ -218,7 +218,7 @@ class ArmVisualization2D(QWidget):
 class ArmGUI(QWidget):
     def __init__(self, cfg: RobotConfig):
         super().__init__()
-        self.setWindowTitle("🤖 Robot Arm Control")
+        self.setWindowTitle("KushBot - Robot Arm Control")
 
         raw = cfg.raw
         self.L1 = float(raw["links"]["L1_mm"])
@@ -228,6 +228,14 @@ class ArmGUI(QWidget):
 
         self.driver = ArduinoStepperDriver(self.port, self.baud)
         self.connected = False
+
+        # Current end effector position (calculated from FK)
+        self.current_ee_x = 0.0
+        self.current_ee_y = 0.0
+        self.current_ee_z = 0.0
+
+        # Keyboard control settings
+        self.keyboard_step_size = 10.0  # mm
 
         # Apply dark theme
         self._apply_dark_theme()
@@ -239,6 +247,10 @@ class ArmGUI(QWidget):
         # Create main layout
         main_layout = QVBoxLayout()
 
+        # Header with KushBot branding
+        header = self._create_header()
+        main_layout.addWidget(header)
+
         # Connection section
         conn_group = self._create_connection_section()
         main_layout.addWidget(conn_group)
@@ -248,6 +260,10 @@ class ArmGUI(QWidget):
 
         # Left side: controls
         left_layout = QVBoxLayout()
+
+        # End Effector Position Display
+        ee_pos_group = self._create_ee_position_section()
+        left_layout.addWidget(ee_pos_group)
 
         # Direct angle control section
         angle_group = self._create_angle_control_section()
@@ -260,6 +276,10 @@ class ArmGUI(QWidget):
         # Action buttons section
         action_group = self._create_action_section()
         left_layout.addWidget(action_group)
+
+        # Keyboard controls help
+        keyboard_help = self._create_keyboard_help()
+        left_layout.addWidget(keyboard_help)
 
         content_layout.addLayout(left_layout, 1)
 
@@ -276,13 +296,14 @@ class ArmGUI(QWidget):
         log_layout = QVBoxLayout()
         self.log = QTextEdit()
         self.log.setReadOnly(True)
-        self.log.setMaximumHeight(150)
+        self.log.setMaximumHeight(120)
         log_layout.addWidget(self.log)
         log_group.setLayout(log_layout)
         main_layout.addWidget(log_group)
 
         self.setLayout(main_layout)
-        self.write("🚀 GUI ready. Click 'Connect Arduino' when plugged in.")
+        self.write("🚀 KushBot ready. Click 'Connect Arduino' when plugged in.")
+        self.write("⌨️ Use arrow keys + W/S for keyboard control after connecting")
 
     def _apply_dark_theme(self):
         """Apply dark theme with purple accents"""
@@ -383,6 +404,112 @@ class ArmGUI(QWidget):
                 color: #d896ff;
             }
         """)
+
+    def _create_header(self):
+        """Create KushBot branding header"""
+        header = QWidget()
+        layout = QVBoxLayout()
+
+        # Main title
+        title = QLabel("⚡ KUSHBOT ⚡")
+        title.setStyleSheet("""
+            font-size: 32pt;
+            font-weight: bold;
+            color: #a020f0;
+            background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                stop:0 #a020f0, stop:0.5 #d896ff, stop:1 #a020f0);
+            -webkit-background-clip: text;
+            padding: 10px;
+        """)
+        title.setAlignment(Qt.AlignCenter)
+
+        # Subtitle
+        subtitle = QLabel("3-DOF Robot Arm Control System")
+        subtitle.setStyleSheet("font-size: 12pt; color: #d896ff;")
+        subtitle.setAlignment(Qt.AlignCenter)
+
+        layout.addWidget(title)
+        layout.addWidget(subtitle)
+        header.setLayout(layout)
+        return header
+
+    def _create_ee_position_section(self):
+        """Create end effector position display and control"""
+        group = QGroupBox("📍 End Effector Position (Real-time)")
+        layout = QVBoxLayout()
+
+        # Position display (read-only, updated automatically)
+        pos_layout = QHBoxLayout()
+
+        self.ee_x_display = QLabel("X: 0.0 mm")
+        self.ee_y_display = QLabel("Y: 0.0 mm")
+        self.ee_z_display = QLabel("Z: 0.0 mm")
+
+        for label in [self.ee_x_display, self.ee_y_display, self.ee_z_display]:
+            label.setStyleSheet("""
+                font-size: 14pt;
+                font-weight: bold;
+                color: #00ff00;
+                background-color: #0f0f0f;
+                border: 2px solid #a020f0;
+                border-radius: 4px;
+                padding: 8px;
+            """)
+            pos_layout.addWidget(label)
+
+        layout.addLayout(pos_layout)
+
+        # Override controls (for manual input)
+        override_layout = QHBoxLayout()
+        override_label = QLabel("Manual Override:")
+        override_label.setStyleSheet("font-size: 10pt; color: #d896ff;")
+
+        self.ee_x_override = QDoubleSpinBox()
+        self.ee_y_override = QDoubleSpinBox()
+        self.ee_z_override = QDoubleSpinBox()
+
+        for spinbox in [self.ee_x_override, self.ee_y_override, self.ee_z_override]:
+            spinbox.setRange(-500, 500)
+            spinbox.setSingleStep(1.0)
+            spinbox.setDecimals(1)
+            spinbox.setMinimumWidth(80)
+
+        override_btn = QPushButton("Move to Override Position")
+        override_btn.clicked.connect(self._move_to_override_position)
+
+        override_layout.addWidget(override_label)
+        override_layout.addWidget(QLabel("X:"))
+        override_layout.addWidget(self.ee_x_override)
+        override_layout.addWidget(QLabel("Y:"))
+        override_layout.addWidget(self.ee_y_override)
+        override_layout.addWidget(QLabel("Z:"))
+        override_layout.addWidget(self.ee_z_override)
+        override_layout.addWidget(override_btn)
+
+        layout.addLayout(override_layout)
+
+        group.setLayout(layout)
+        return group
+
+    def _create_keyboard_help(self):
+        """Create keyboard controls legend"""
+        group = QGroupBox("⌨️ Keyboard Controls")
+        layout = QVBoxLayout()
+
+        help_text = QLabel(
+            "🔼 Up Arrow: Forward (+Y)\n"
+            "🔽 Down Arrow: Backward (-Y)\n"
+            "◀️ Left Arrow: Left (-X)\n"
+            "▶️ Right Arrow: Right (+X)\n"
+            "🔤 W: Up (+Z)\n"
+            "🔤 S: Down (-Z)\n"
+            "Step size: 10mm per key press"
+        )
+        help_text.setStyleSheet("font-size: 10pt; color: #d896ff; line-height: 1.6;")
+
+        layout.addWidget(help_text)
+        group.setLayout(layout)
+        return group
 
     def _create_connection_section(self):
         group = QGroupBox("🔌 Connection")
@@ -528,12 +655,16 @@ class ArmGUI(QWidget):
         self.shoulder_angle_label.setText(f"{shoulder}°")
         self.elbow_angle_label.setText(f"{elbow}°")
 
+        # Calculate and update end effector position
+        self._calculate_forward_kinematics(base, shoulder, elbow)
+        self._update_ee_display()
+
         # Update visualizations
         self.side_view.update_angles(base, shoulder, elbow)
         self.top_view.update_angles(base, shoulder, elbow)
 
     def _create_ik_control_section(self):
-        group = QGroupBox("📍 End Effector Position (IK)")
+        group = QGroupBox("🎯 Target Position Control (IK)")
         layout = QVBoxLayout()
 
         # X position
@@ -616,6 +747,111 @@ class ArmGUI(QWidget):
 
     def write(self, s: str):
         self.log.append(s)
+
+    def _calculate_forward_kinematics(self, base_deg: float, shoulder_deg: float, elbow_deg: float):
+        """Calculate end effector position from joint angles"""
+        # Convert to radians
+        base_rad = deg2rad(base_deg)
+        shoulder_rad = deg2rad(shoulder_deg + 90)  # Add 90 since 0 is vertical
+        elbow_rad = deg2rad(elbow_deg)
+
+        # Calculate 2D arm position (in plane of shoulder/elbow)
+        elbow_x = self.L1 * math.cos(shoulder_rad)
+        elbow_y = self.L1 * math.sin(shoulder_rad)
+
+        end_x_2d = elbow_x + self.L2 * math.cos(shoulder_rad + elbow_rad)
+        end_y_2d = elbow_y + self.L2 * math.sin(shoulder_rad + elbow_rad)
+
+        # Project to 3D with base rotation
+        self.current_ee_x = end_x_2d * math.cos(base_rad)
+        self.current_ee_y = end_x_2d * math.sin(base_rad)
+        self.current_ee_z = end_y_2d
+
+    def _update_ee_display(self):
+        """Update end effector position display labels"""
+        self.ee_x_display.setText(f"X: {self.current_ee_x:.1f} mm")
+        self.ee_y_display.setText(f"Y: {self.current_ee_y:.1f} mm")
+        self.ee_z_display.setText(f"Z: {self.current_ee_z:.1f} mm")
+
+        # Also update override spinboxes to show current position
+        self.ee_x_override.setValue(self.current_ee_x)
+        self.ee_y_override.setValue(self.current_ee_y)
+        self.ee_z_override.setValue(self.current_ee_z)
+
+    def _move_to_override_position(self):
+        """Move to manually entered override position"""
+        x = self.ee_x_override.value()
+        y = self.ee_y_override.value()
+        z = self.ee_z_override.value()
+
+        self.write(f"🎯 Moving to override position: X={x:.1f}, Y={y:.1f}, Z={z:.1f}")
+
+        # Calculate distance in XY plane
+        r = math.sqrt(x*x + y*y)
+
+        # Calculate base angle
+        base_deg = rad2deg(math.atan2(y, x))
+
+        # Use IK for 2D arm in vertical plane
+        result = ik_2link_planar(r, z, self.L1, self.L2, elbow_up=True)
+
+        if not result.ok:
+            self.write(f"❌ IK failed: {result.message}")
+            return
+
+        shoulder_deg = rad2deg(result.theta1_rad) - 90  # Subtract 90 since 0 is vertical
+        elbow_deg = rad2deg(result.theta2_rad)
+
+        self.write(f"📐 IK solution: base={base_deg:.1f}°, shoulder={shoulder_deg:.1f}°, elbow={elbow_deg:.1f}°")
+
+        # Update dials (with inversion)
+        self.base_dial.setValue(-int(base_deg))
+        self.shoulder_dial.setValue(-int(shoulder_deg))
+        self.elbow_dial.setValue(-int(elbow_deg))
+
+        # Send to robot
+        self.send_angles()
+
+    def keyPressEvent(self, event):
+        """Handle keyboard input for end effector control"""
+        if not self.connected:
+            return
+
+        # Calculate new target position based on key press
+        dx, dy, dz = 0, 0, 0
+
+        key = event.key()
+        if key == Qt.Key_Up:
+            dy = self.keyboard_step_size  # Forward
+            self.write(f"⬆️ Forward +{self.keyboard_step_size}mm")
+        elif key == Qt.Key_Down:
+            dy = -self.keyboard_step_size  # Backward
+            self.write(f"⬇️ Backward -{self.keyboard_step_size}mm")
+        elif key == Qt.Key_Left:
+            dx = -self.keyboard_step_size  # Left
+            self.write(f"⬅️ Left -{self.keyboard_step_size}mm")
+        elif key == Qt.Key_Right:
+            dx = self.keyboard_step_size  # Right
+            self.write(f"➡️ Right +{self.keyboard_step_size}mm")
+        elif key == Qt.Key_W or key == Qt.Key_W - 32:  # W or w
+            dz = self.keyboard_step_size  # Up
+            self.write(f"🔼 Up +{self.keyboard_step_size}mm")
+        elif key == Qt.Key_S or key == Qt.Key_S - 32:  # S or s
+            dz = -self.keyboard_step_size  # Down
+            self.write(f"🔽 Down -{self.keyboard_step_size}mm")
+        else:
+            return  # Ignore other keys
+
+        # Calculate new position
+        new_x = self.current_ee_x + dx
+        new_y = self.current_ee_y + dy
+        new_z = self.current_ee_z + dz
+
+        # Update override spinboxes and move
+        self.ee_x_override.setValue(new_x)
+        self.ee_y_override.setValue(new_y)
+        self.ee_z_override.setValue(new_z)
+        self._move_to_override_position()
 
     def connect_arduino(self):
         if self.connected:
