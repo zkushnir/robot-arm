@@ -316,39 +316,191 @@ class ArmGUI(QWidget):
         self.write("🚀 KushBot ready. Click 'Connect Arduino' when plugged in.")
         self.write("⌨️ Use arrow keys + W/S for keyboard control after connecting")
 
+    def resizeEvent(self, event):
+        """Dynamically adjust UI scaling based on window size"""
+        super().resizeEvent(event)
+
+        # Get window dimensions
+        width = self.width()
+        height = self.height()
+
+        # Calculate scale factor based on width (baseline: 1400px)
+        scale_factor = width / 1400.0
+
+        # Clamp scale factor between 0.8 and 2.0
+        scale_factor = max(0.8, min(2.0, scale_factor))
+
+        # Base font sizes
+        base_font = int(14 * scale_factor)
+        group_font = int(15 * scale_factor)
+        button_font = int(14 * scale_factor)
+        spinbox_font = int(15 * scale_factor)
+        ee_display_font = int(16 * scale_factor)
+
+        # Update stylesheet with scaled fonts
+        self.setStyleSheet(f"""
+            QWidget {{
+                background-color: #0a0a0a;
+                color: #a020f0;
+                font-family: 'Segoe UI', Arial, sans-serif;
+                font-size: {base_font}pt;
+            }}
+            QGroupBox {{
+                border: 3px solid #a020f0;
+                border-radius: 10px;
+                margin-top: 16px;
+                padding-top: 22px;
+                font-weight: bold;
+                font-size: {group_font}pt;
+                color: #a020f0;
+            }}
+            QGroupBox::title {{
+                subcontrol-origin: margin;
+                subcontrol-position: top left;
+                padding: 6px 14px;
+                font-size: {group_font}pt;
+                color: #a020f0;
+            }}
+            QLabel {{
+                color: #d896ff;
+                font-size: {base_font}pt;
+            }}
+            QPushButton {{
+                background-color: #1a1a1a;
+                border: 3px solid #a020f0;
+                border-radius: 8px;
+                padding: 12px 20px;
+                color: #a020f0;
+                font-weight: bold;
+                font-size: {button_font}pt;
+                min-height: 35px;
+            }}
+            QPushButton:hover {{
+                background-color: #a020f0;
+                color: #0a0a0a;
+            }}
+            QPushButton:pressed {{
+                background-color: #8010d0;
+            }}
+            QPushButton:disabled {{
+                background-color: #1a1a1a;
+                border-color: #404040;
+                color: #404040;
+            }}
+            QTextEdit {{
+                background-color: #0f0f0f;
+                border: 3px solid #a020f0;
+                border-radius: 8px;
+                color: #d896ff;
+                padding: 10px;
+                font-size: {int(13 * scale_factor)}pt;
+            }}
+            QSpinBox, QDoubleSpinBox {{
+                background-color: #1a1a1a;
+                border: 3px solid #a020f0;
+                border-radius: 6px;
+                padding: 8px;
+                color: #d896ff;
+                font-size: {spinbox_font}pt;
+                font-weight: bold;
+                min-height: 30px;
+            }}
+            QSpinBox::up-button, QDoubleSpinBox::up-button {{
+                border-left: 2px solid #a020f0;
+                background-color: #2a2a2a;
+                width: 25px;
+            }}
+            QSpinBox::down-button, QDoubleSpinBox::down-button {{
+                border-left: 2px solid #a020f0;
+                background-color: #2a2a2a;
+                width: 25px;
+            }}
+            QDial {{
+                background-color: #1a1a1a;
+            }}
+            QComboBox {{
+                background-color: #1a1a1a;
+                border: 3px solid #a020f0;
+                border-radius: 6px;
+                padding: 8px;
+                color: #d896ff;
+                font-size: {base_font}pt;
+                min-height: 30px;
+            }}
+            QComboBox:hover {{
+                border-color: #d896ff;
+            }}
+            QComboBox::drop-down {{
+                border-left: 2px solid #a020f0;
+                background-color: #2a2a2a;
+                width: 25px;
+            }}
+            QComboBox::down-arrow {{
+                image: none;
+                border-left: 6px solid transparent;
+                border-right: 6px solid transparent;
+                border-top: 6px solid #a020f0;
+            }}
+            QComboBox QAbstractItemView {{
+                background-color: #1a1a1a;
+                border: 3px solid #a020f0;
+                selection-background-color: #a020f0;
+                selection-color: #0a0a0a;
+                color: #d896ff;
+                font-size: {base_font}pt;
+            }}
+        """)
+
+        # Update EE display labels with scaled font
+        for label in [self.ee_x_display, self.ee_y_display, self.ee_z_display]:
+            label.setStyleSheet(f"""
+                font-size: {ee_display_font}pt;
+                font-weight: bold;
+                color: #00ff00;
+                background-color: #0f0f0f;
+                border: 3px solid #a020f0;
+                border-radius: 6px;
+                padding: 10px;
+            """)
+
     def _apply_dark_theme(self):
-        """Apply dark theme with purple accents"""
+        """Apply dark theme with LARGE READABLE text"""
         self.setStyleSheet("""
             QWidget {
                 background-color: #0a0a0a;
                 color: #a020f0;
                 font-family: 'Segoe UI', Arial, sans-serif;
-                font-size: 11pt;
+                font-size: 14pt;
             }
             QGroupBox {
-                border: 2px solid #a020f0;
-                border-radius: 8px;
-                margin-top: 12px;
-                padding-top: 15px;
+                border: 3px solid #a020f0;
+                border-radius: 10px;
+                margin-top: 16px;
+                padding-top: 22px;
                 font-weight: bold;
+                font-size: 15pt;
                 color: #a020f0;
             }
             QGroupBox::title {
                 subcontrol-origin: margin;
                 subcontrol-position: top left;
-                padding: 5px 10px;
+                padding: 6px 14px;
+                font-size: 15pt;
                 color: #a020f0;
             }
             QLabel {
                 color: #d896ff;
+                font-size: 14pt;
             }
             QPushButton {
                 background-color: #1a1a1a;
-                border: 2px solid #a020f0;
-                border-radius: 6px;
-                padding: 8px 16px;
+                border: 3px solid #a020f0;
+                border-radius: 8px;
+                padding: 12px 20px;
                 color: #a020f0;
                 font-weight: bold;
+                font-size: 14pt;
+                min-height: 35px;
             }
             QPushButton:hover {
                 background-color: #a020f0;
@@ -364,55 +516,65 @@ class ArmGUI(QWidget):
             }
             QTextEdit {
                 background-color: #0f0f0f;
-                border: 2px solid #a020f0;
-                border-radius: 6px;
+                border: 3px solid #a020f0;
+                border-radius: 8px;
                 color: #d896ff;
-                padding: 8px;
+                padding: 10px;
+                font-size: 13pt;
             }
             QSpinBox, QDoubleSpinBox {
                 background-color: #1a1a1a;
-                border: 2px solid #a020f0;
-                border-radius: 4px;
-                padding: 4px;
+                border: 3px solid #a020f0;
+                border-radius: 6px;
+                padding: 8px;
                 color: #d896ff;
+                font-size: 15pt;
+                font-weight: bold;
+                min-height: 30px;
             }
             QSpinBox::up-button, QDoubleSpinBox::up-button {
-                border-left: 1px solid #a020f0;
+                border-left: 2px solid #a020f0;
                 background-color: #2a2a2a;
+                width: 25px;
             }
             QSpinBox::down-button, QDoubleSpinBox::down-button {
-                border-left: 1px solid #a020f0;
+                border-left: 2px solid #a020f0;
                 background-color: #2a2a2a;
+                width: 25px;
             }
             QDial {
                 background-color: #1a1a1a;
             }
             QComboBox {
                 background-color: #1a1a1a;
-                border: 2px solid #a020f0;
-                border-radius: 4px;
-                padding: 4px;
+                border: 3px solid #a020f0;
+                border-radius: 6px;
+                padding: 8px;
                 color: #d896ff;
+                font-size: 14pt;
+                min-height: 30px;
             }
             QComboBox:hover {
                 border-color: #d896ff;
             }
             QComboBox::drop-down {
-                border-left: 1px solid #a020f0;
+                border-left: 2px solid #a020f0;
                 background-color: #2a2a2a;
+                width: 25px;
             }
             QComboBox::down-arrow {
                 image: none;
-                border-left: 4px solid transparent;
-                border-right: 4px solid transparent;
-                border-top: 4px solid #a020f0;
+                border-left: 6px solid transparent;
+                border-right: 6px solid transparent;
+                border-top: 6px solid #a020f0;
             }
             QComboBox QAbstractItemView {
                 background-color: #1a1a1a;
-                border: 2px solid #a020f0;
+                border: 3px solid #a020f0;
                 selection-background-color: #a020f0;
                 selection-color: #0a0a0a;
                 color: #d896ff;
+                font-size: 14pt;
             }
         """)
 
@@ -458,13 +620,13 @@ class ArmGUI(QWidget):
 
         for label in [self.ee_x_display, self.ee_y_display, self.ee_z_display]:
             label.setStyleSheet("""
-                font-size: 11pt;
+                font-size: 16pt;
                 font-weight: bold;
                 color: #00ff00;
                 background-color: #0f0f0f;
-                border: 2px solid #a020f0;
-                border-radius: 4px;
-                padding: 6px;
+                border: 3px solid #a020f0;
+                border-radius: 6px;
+                padding: 10px;
             """)
             label.setAlignment(Qt.AlignCenter)
             pos_layout.addWidget(label)
