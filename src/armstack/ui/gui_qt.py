@@ -236,9 +236,10 @@ class ArmGUI(QWidget):
         self.connected = False
 
         # Current end effector position (calculated from FK)
+        # At zero angles, arm points straight up: EE is at (0, 0, L1+L2)
         self.current_ee_x = 0.0
         self.current_ee_y = 0.0
-        self.current_ee_z = 0.0
+        self.current_ee_z = self.L1 + self.L2
 
         # Keyboard control settings
         self.keyboard_step_size = 10.0  # mm
@@ -313,6 +314,9 @@ class ArmGUI(QWidget):
         self.setFocusPolicy(Qt.StrongFocus)
         self.setFocus()
 
+        # Initialize EE position display to show starting position
+        self._update_ee_display()
+
         self.write("🚀 KushBot ready. Click 'Connect Arduino' when plugged in.")
         self.write("⌨️ Use arrow keys + W/S for keyboard control after connecting")
 
@@ -325,17 +329,17 @@ class ArmGUI(QWidget):
         height = self.height()
 
         # Calculate scale factor based on width (baseline: 1400px)
-        scale_factor = width / 1400.0
+        scale_factor = width / 1600.0
 
-        # Clamp scale factor between 0.8 and 2.0
-        scale_factor = max(0.8, min(2.0, scale_factor))
+        # Clamp scale factor between 0.7 and 1.5
+        scale_factor = max(0.7, min(1.5, scale_factor))
 
-        # Base font sizes
-        base_font = int(14 * scale_factor)
-        group_font = int(15 * scale_factor)
-        button_font = int(14 * scale_factor)
-        spinbox_font = int(15 * scale_factor)
-        ee_display_font = int(16 * scale_factor)
+        # Base font sizes - smaller for fullscreen visibility
+        base_font = int(11 * scale_factor)
+        group_font = int(12 * scale_factor)
+        button_font = int(11 * scale_factor)
+        spinbox_font = int(12 * scale_factor)
+        ee_display_font = int(13 * scale_factor)
 
         # Update stylesheet with scaled fonts
         self.setStyleSheet(f"""
@@ -346,10 +350,10 @@ class ArmGUI(QWidget):
                 font-size: {base_font}pt;
             }}
             QGroupBox {{
-                border: 3px solid #a020f0;
-                border-radius: 10px;
-                margin-top: 16px;
-                padding-top: 22px;
+                border: 2px solid #a020f0;
+                border-radius: 6px;
+                margin-top: 8px;
+                padding-top: 12px;
                 font-weight: bold;
                 font-size: {group_font}pt;
                 color: #a020f0;
@@ -357,7 +361,7 @@ class ArmGUI(QWidget):
             QGroupBox::title {{
                 subcontrol-origin: margin;
                 subcontrol-position: top left;
-                padding: 6px 14px;
+                padding: 3px 8px;
                 font-size: {group_font}pt;
                 color: #a020f0;
             }}
@@ -367,13 +371,13 @@ class ArmGUI(QWidget):
             }}
             QPushButton {{
                 background-color: #1a1a1a;
-                border: 3px solid #a020f0;
-                border-radius: 8px;
-                padding: 12px 20px;
+                border: 2px solid #a020f0;
+                border-radius: 5px;
+                padding: 6px 12px;
                 color: #a020f0;
                 font-weight: bold;
                 font-size: {button_font}pt;
-                min-height: 35px;
+                min-height: 25px;
             }}
             QPushButton:hover {{
                 background-color: #a020f0;
@@ -671,15 +675,14 @@ class ArmGUI(QWidget):
         layout = QVBoxLayout()
 
         help_text = QLabel(
-            "🔼 Up Arrow: Forward (+Y)\n"
-            "🔽 Down Arrow: Backward (-Y)\n"
-            "◀️ Left Arrow: Left (-X)\n"
-            "▶️ Right Arrow: Right (+X)\n"
-            "🔤 W: Up (+Z)\n"
-            "🔤 S: Down (-Z)\n"
-            "Step size: 10mm per key press"
+            "🔼 Up: Forward (+X)\n"
+            "🔽 Down: Backward (-X)\n"
+            "◀️ Left: Left (-Y)\n"
+            "▶️ Right: Right (+Y)\n"
+            "W: Up (+Z)  |  S: Down (-Z)\n"
+            "Step: 10mm"
         )
-        help_text.setStyleSheet("font-size: 10pt; color: #d896ff; line-height: 1.6;")
+        help_text.setStyleSheet("color: #d896ff; line-height: 1.4;")
 
         layout.addWidget(help_text)
         group.setLayout(layout)
@@ -997,13 +1000,13 @@ class ArmGUI(QWidget):
 
         key = event.key()
         if key == Qt.Key_Up:
-            dy = self.keyboard_step_size  # Forward (+Y)
+            dx = self.keyboard_step_size  # Forward (+X when base=0)
         elif key == Qt.Key_Down:
-            dy = -self.keyboard_step_size  # Backward (-Y)
+            dx = -self.keyboard_step_size  # Backward (-X when base=0)
         elif key == Qt.Key_Left:
-            dx = -self.keyboard_step_size  # Left (-X)
+            dy = -self.keyboard_step_size  # Left (-Y)
         elif key == Qt.Key_Right:
-            dx = self.keyboard_step_size  # Right (+X)
+            dy = self.keyboard_step_size  # Right (+Y)
         elif key == Qt.Key_W or key == Qt.Key_W - 32:  # W or w
             dz = self.keyboard_step_size  # Up (+Z)
         elif key == Qt.Key_S or key == Qt.Key_S - 32:  # S or s
