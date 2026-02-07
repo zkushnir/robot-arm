@@ -1,15 +1,16 @@
 import math
+import numpy as np
 
 # Support both PySide6 and PyQt5
 try:
-    from PySide6.QtCore import Qt, QPointF, QRectF, Signal
+    from PySide6.QtCore import Qt, QPointF, QRectF, Signal, QTimer
     from PySide6.QtGui import QPainter, QPen, QColor, QBrush, QPainterPath
     from PySide6.QtWidgets import (
         QWidget, QVBoxLayout, QHBoxLayout, QLabel,
         QSlider, QDoubleSpinBox, QPushButton, QTextEdit, QGroupBox, QSpinBox, QDial, QComboBox
     )
 except ImportError:
-    from PyQt5.QtCore import Qt, QPointF, QRectF, pyqtSignal as Signal
+    from PyQt5.QtCore import Qt, QPointF, QRectF, pyqtSignal as Signal, QTimer
     from PyQt5.QtGui import QPainter, QPen, QColor, QBrush, QPainterPath
     from PyQt5.QtWidgets import (
         QWidget, QVBoxLayout, QHBoxLayout, QLabel,
@@ -19,6 +20,8 @@ except ImportError:
 from armstack.core.config import RobotConfig
 from armstack.kinematics.planar_2link import ik_2link_planar
 from armstack.drivers.arduino_stepper import ArduinoStepperDriver
+from armstack.planning.jacobian_ik import JacobianIKSolver
+from armstack.planning.motion_controller import MotionController
 
 def rad2deg(r: float) -> float:
     return r * 180.0 / math.pi
@@ -241,8 +244,21 @@ class ArmGUI(QWidget):
         self.current_ee_y = 0.0
         self.current_ee_z = self.L1 + self.L2
 
+        # Advanced motion control system
+        self.ik_solver = JacobianIKSolver(self.L1, self.L2)
+        self.motion_controller = MotionController(
+            ik_solver=self.ik_solver,
+            command_callback=self._send_joint_command,
+            update_rate=50.0  # 50 Hz for smooth motion
+        )
+
         # Keyboard control settings
         self.keyboard_step_size = 10.0  # mm
+
+        # Timer for updating visualization from motion controller
+        self.viz_update_timer = QTimer()
+        self.viz_update_timer.timeout.connect(self._update_from_controller)
+        self.viz_update_timer.setInterval(50)  # 20 Hz visualization update
 
         # Apply dark theme
         self._apply_dark_theme()
@@ -922,6 +938,49 @@ class ArmGUI(QWidget):
         group.setLayout(layout)
         return group
 
+    def _send_joint_command(self, angles_deg: np.ndarray, speed_deg_s: float):
+        """Callback for motion controller to send commands to robot"""
+        if not self.connected:
+            return
+
+        try:
+            base, shoulder, elbow = angles_deg
+            # Negate base and elbow for correct motor direction
+            self.driver.move_joints_deg(-base, shoulder, -elbow, speed_deg_s)
+        except Exception as e:
+            print(f"Command send error: {e}")
+
+    def _update_from_controller(self):
+        """Update visualization from motion controller state"""
+        if not self.connected:
+            return
+
+        # Get current joint angles from controller
+        q_rad = self.motion_controller.get_current_joints()
+        q_deg = np.rad2deg(q_rad)
+
+        # Update dials (with inversion)
+        self.base_dial.blockSignals(True)
+        self.shoulder_dial.blockSignals(True)
+        self.elbow_dial.blockSignals(True)
+
+        self.base_dial.setValue(-int(q_deg[0]))
+        self.shoulder_dial.setValue(-int(q_deg[1]))
+        self.elbow_dial.setValue(-int(q_deg[2]))
+
+        self.base_dial.blockSignals(False)
+        self.shoulder_dial.blockSignals(False)
+        self.elbow_dial.blockSignals(False)
+
+        # Calculate and update EE position
+        base, shoulder, elbow = q_deg
+        self._calculate_forward_kinematics(base, shoulder, elbow)
+        self._update_ee_display()
+
+        # Update visualizations
+        self.side_view.update_angles(base, shoulder, elbow)
+        self.top_view.update_angles(base, shoulder, elbow)
+
     def write(self, s: str):
         self.log.append(s)
 
@@ -1036,50 +1095,27 @@ class ArmGUI(QWidget):
 
         self.write(f"{direction} → Target: ({new_x:.1f}, {new_y:.1f}, {new_z:.1f})")
 
-        # Execute movement immediately via IK
-        # Pass deltas to preserve base angle when only moving in Z
+        # Use advanced motion controller for smooth trajectory
         z_only = (dx == 0 and dy == 0 and dz != 0)
-        self._execute_keyboard_move(new_x, new_y, new_z, z_only)
 
-    def _execute_keyboard_move(self, x: float, y: float, z: float, z_only: bool = False):
-        """Execute immediate movement to target position"""
         try:
-            # Calculate distance in XY plane
-            r = math.sqrt(x*x + y*y)
+            target_pos = np.array([new_x, new_y, new_z])
 
-            # Calculate base angle - preserve current angle if only moving in Z
             if z_only:
-                # Get current base angle from dial (inverted)
-                base_deg = -self.base_dial.value()
+                # Preserve base angle when moving only in Z
+                current_base_rad = np.deg2rad(-self.base_dial.value())
+                self.motion_controller.move_to_with_fixed_base(target_pos, current_base_rad)
             else:
-                # Calculate base angle from target position
-                base_deg = rad2deg(math.atan2(y, x))
+                # Normal smooth move with trajectory planning
+                self.motion_controller.move_to(target_pos, smooth=True)
 
-            # Use IK for 2D arm in vertical plane
-            result = ik_2link_planar(r, z, self.L1, self.L2, elbow_up=True)
-
-            if not result.ok:
-                self.write(f"❌ Target unreachable: {result.message}")
-                return
-
-            shoulder_deg = rad2deg(result.theta1_rad) - 90  # Subtract 90 since 0 is vertical
-            elbow_deg = rad2deg(result.theta2_rad)
-
-            # Send command immediately to robot
-            speed = float(self.speed_in.value())
-
-            self.write(f"🎮 Moving: Base={base_deg:.1f}°, Shoulder={shoulder_deg:.1f}°, Elbow={elbow_deg:.1f}° @ {speed:.0f}°/s")
-
-            # Negate base and elbow for correct motor direction
-            self.driver.move_joints_deg(-base_deg, shoulder_deg, -elbow_deg, speed)
-
-            # Update visualization (dials) to match
-            self.base_dial.setValue(-int(base_deg))
-            self.shoulder_dial.setValue(-int(shoulder_deg))
-            self.elbow_dial.setValue(-int(elbow_deg))
+            # Update current EE position for next move
+            self.current_ee_x = new_x
+            self.current_ee_y = new_y
+            self.current_ee_z = new_z
 
         except Exception as e:
-            self.write(f"❌ Keyboard move failed: {e}")
+            self.write(f"❌ Motion control error: {e}")
 
     def connect_arduino(self):
         if self.connected:
@@ -1097,6 +1133,13 @@ class ArmGUI(QWidget):
             self.port_combo.setEnabled(False)
             for ln in self.driver.read_lines(10):
                 self.write(f"🤖 ARD: {ln}")
+
+            # Start motion controller and visualization updates
+            self.motion_controller.start()
+            self.viz_update_timer.start()
+            self.write("🚀 Advanced motion control system started (50Hz)")
+            self.write("✨ Smooth trajectory planning enabled!")
+
         except Exception as e:
             self.write(f"❌ Connect failed: {e}")
             self.status_label.setText(f"🔴 Connection Failed - {self.port}")
