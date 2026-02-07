@@ -328,18 +328,18 @@ class ArmGUI(QWidget):
         width = self.width()
         height = self.height()
 
-        # Calculate scale factor based on width (baseline: 1400px)
-        scale_factor = width / 1600.0
+        # Calculate scale factor based on width (baseline: 2000px for fullscreen)
+        scale_factor = width / 2000.0
 
-        # Clamp scale factor between 0.7 and 1.5
-        scale_factor = max(0.7, min(1.5, scale_factor))
+        # Clamp scale factor between 0.6 and 1.2
+        scale_factor = max(0.6, min(1.2, scale_factor))
 
-        # Base font sizes - smaller for fullscreen visibility
-        base_font = int(11 * scale_factor)
-        group_font = int(12 * scale_factor)
-        button_font = int(11 * scale_factor)
-        spinbox_font = int(12 * scale_factor)
-        ee_display_font = int(13 * scale_factor)
+        # Base font sizes - very compact for fullscreen visibility
+        base_font = int(10 * scale_factor)
+        group_font = int(11 * scale_factor)
+        button_font = int(10 * scale_factor)
+        spinbox_font = int(11 * scale_factor)
+        ee_display_font = int(12 * scale_factor)
 
         # Update stylesheet with scaled fonts
         self.setStyleSheet(f"""
@@ -762,11 +762,11 @@ class ArmGUI(QWidget):
         # Create a horizontal layout for the three dials
         dials_layout = QHBoxLayout()
 
-        # Base motor dial
+        # Base motor dial (±90° limit)
         base_container = QVBoxLayout()
         base_container.addWidget(QLabel("Base"), alignment=Qt.AlignCenter)
         self.base_dial = QDial()
-        self.base_dial.setRange(-180, 180)
+        self.base_dial.setRange(-90, 90)
         self.base_dial.setValue(0)
         self.base_dial.setNotchesVisible(True)
         self.base_dial.setWrapping(False)
@@ -778,11 +778,11 @@ class ArmGUI(QWidget):
         base_container.addWidget(self.base_angle_label)
         dials_layout.addLayout(base_container)
 
-        # Shoulder motor dial
+        # Shoulder motor dial (±90° limit)
         shoulder_container = QVBoxLayout()
         shoulder_container.addWidget(QLabel("Shoulder"), alignment=Qt.AlignCenter)
         self.shoulder_dial = QDial()
-        self.shoulder_dial.setRange(-180, 180)
+        self.shoulder_dial.setRange(-90, 90)
         self.shoulder_dial.setValue(0)
         self.shoulder_dial.setNotchesVisible(True)
         self.shoulder_dial.setWrapping(False)
@@ -794,11 +794,11 @@ class ArmGUI(QWidget):
         shoulder_container.addWidget(self.shoulder_angle_label)
         dials_layout.addLayout(shoulder_container)
 
-        # Elbow motor dial
+        # Elbow motor dial (±90° limit)
         elbow_container = QVBoxLayout()
         elbow_container.addWidget(QLabel("Elbow"), alignment=Qt.AlignCenter)
         self.elbow_dial = QDial()
-        self.elbow_dial.setRange(-180, 180)
+        self.elbow_dial.setRange(-90, 90)
         self.elbow_dial.setValue(0)
         self.elbow_dial.setNotchesVisible(True)
         self.elbow_dial.setWrapping(False)
@@ -1021,13 +1021,13 @@ class ArmGUI(QWidget):
 
         # Log the command
         direction = ""
-        if dy > 0:
+        if dx > 0:
             direction = "⬆️ Forward"
-        elif dy < 0:
-            direction = "⬇️ Backward"
-        elif dx > 0:
-            direction = "➡️ Right"
         elif dx < 0:
+            direction = "⬇️ Backward"
+        elif dy > 0:
+            direction = "➡️ Right"
+        elif dy < 0:
             direction = "⬅️ Left"
         elif dz > 0:
             direction = "🔼 Up"
@@ -1037,16 +1037,23 @@ class ArmGUI(QWidget):
         self.write(f"{direction} → Target: ({new_x:.1f}, {new_y:.1f}, {new_z:.1f})")
 
         # Execute movement immediately via IK
-        self._execute_keyboard_move(new_x, new_y, new_z)
+        # Pass deltas to preserve base angle when only moving in Z
+        z_only = (dx == 0 and dy == 0 and dz != 0)
+        self._execute_keyboard_move(new_x, new_y, new_z, z_only)
 
-    def _execute_keyboard_move(self, x: float, y: float, z: float):
+    def _execute_keyboard_move(self, x: float, y: float, z: float, z_only: bool = False):
         """Execute immediate movement to target position"""
         try:
             # Calculate distance in XY plane
             r = math.sqrt(x*x + y*y)
 
-            # Calculate base angle
-            base_deg = rad2deg(math.atan2(y, x))
+            # Calculate base angle - preserve current angle if only moving in Z
+            if z_only:
+                # Get current base angle from dial (inverted)
+                base_deg = -self.base_dial.value()
+            else:
+                # Calculate base angle from target position
+                base_deg = rad2deg(math.atan2(y, x))
 
             # Use IK for 2D arm in vertical plane
             result = ik_2link_planar(r, z, self.L1, self.L2, elbow_up=True)
