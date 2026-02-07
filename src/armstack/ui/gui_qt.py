@@ -439,13 +439,17 @@ class ArmGUI(QWidget):
         elif self.port in port_list:
             self.port_combo.setCurrentText(self.port)
 
-        self.write(f"📡 Found {len(port_list)} serial port(s)")
+        # Only log if log widget exists (not during initialization)
+        if hasattr(self, 'log'):
+            self.write(f"📡 Found {len(port_list)} serial port(s)")
 
     def _on_port_changed(self, new_port):
         """Handle port selection change"""
         if new_port:
             self.port = new_port
-            self.write(f"🔧 Port changed to: {new_port}")
+            # Only log if log widget exists (not during initialization)
+            if hasattr(self, 'log'):
+                self.write(f"🔧 Port changed to: {new_port}")
 
     def _create_angle_control_section(self):
         group = QGroupBox("🎯 Direct Motor Angle Control")
