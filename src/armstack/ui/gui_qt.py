@@ -45,7 +45,13 @@ class ArmVisualization2D(QWidget):
         self.target_x = None
         self.target_y = None
 
-        self.setMinimumSize(300, 300)
+        # Make it scalable for fullscreen
+        self.setMinimumSize(200, 200)
+        try:
+            from PySide6.QtWidgets import QSizePolicy
+        except ImportError:
+            from PyQt5.QtWidgets import QSizePolicy
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
 
     def update_angles(self, base: float, shoulder: float, elbow: float):
         """Update arm angles (degrees)"""
@@ -813,45 +819,83 @@ class ArmGUI(QWidget):
         self.send_angles()
 
     def keyPressEvent(self, event):
-        """Handle keyboard input for end effector control"""
+        """Handle keyboard input for IMMEDIATE end effector control"""
         if not self.connected:
+            self.write("⚠️ Connect Arduino first to use keyboard control")
             return
 
-        # Calculate new target position based on key press
+        # Determine movement direction
         dx, dy, dz = 0, 0, 0
 
         key = event.key()
         if key == Qt.Key_Up:
-            dy = self.keyboard_step_size  # Forward
-            self.write(f"⬆️ Forward +{self.keyboard_step_size}mm")
+            dy = self.keyboard_step_size  # Forward (+Y)
         elif key == Qt.Key_Down:
-            dy = -self.keyboard_step_size  # Backward
-            self.write(f"⬇️ Backward -{self.keyboard_step_size}mm")
+            dy = -self.keyboard_step_size  # Backward (-Y)
         elif key == Qt.Key_Left:
-            dx = -self.keyboard_step_size  # Left
-            self.write(f"⬅️ Left -{self.keyboard_step_size}mm")
+            dx = -self.keyboard_step_size  # Left (-X)
         elif key == Qt.Key_Right:
-            dx = self.keyboard_step_size  # Right
-            self.write(f"➡️ Right +{self.keyboard_step_size}mm")
+            dx = self.keyboard_step_size  # Right (+X)
         elif key == Qt.Key_W or key == Qt.Key_W - 32:  # W or w
-            dz = self.keyboard_step_size  # Up
-            self.write(f"🔼 Up +{self.keyboard_step_size}mm")
+            dz = self.keyboard_step_size  # Up (+Z)
         elif key == Qt.Key_S or key == Qt.Key_S - 32:  # S or s
-            dz = -self.keyboard_step_size  # Down
-            self.write(f"🔽 Down -{self.keyboard_step_size}mm")
+            dz = -self.keyboard_step_size  # Down (-Z)
         else:
             return  # Ignore other keys
 
-        # Calculate new position
+        # Calculate new target position from current position
         new_x = self.current_ee_x + dx
         new_y = self.current_ee_y + dy
         new_z = self.current_ee_z + dz
 
-        # Update override spinboxes and move
-        self.ee_x_override.setValue(new_x)
-        self.ee_y_override.setValue(new_y)
-        self.ee_z_override.setValue(new_z)
-        self._move_to_override_position()
+        # Log the command
+        direction = ""
+        if dy > 0:
+            direction = "⬆️ Forward"
+        elif dy < 0:
+            direction = "⬇️ Backward"
+        elif dx > 0:
+            direction = "➡️ Right"
+        elif dx < 0:
+            direction = "⬅️ Left"
+        elif dz > 0:
+            direction = "🔼 Up"
+        elif dz < 0:
+            direction = "🔽 Down"
+
+        self.write(f"{direction} → Target: ({new_x:.1f}, {new_y:.1f}, {new_z:.1f})")
+
+        # Execute movement immediately via IK
+        self._execute_keyboard_move(new_x, new_y, new_z)
+
+    def _execute_keyboard_move(self, x: float, y: float, z: float):
+        """Execute immediate movement to target position"""
+        # Calculate distance in XY plane
+        r = math.sqrt(x*x + y*y)
+
+        # Calculate base angle
+        base_deg = rad2deg(math.atan2(y, x))
+
+        # Use IK for 2D arm in vertical plane
+        result = ik_2link_planar(r, z, self.L1, self.L2, elbow_up=True)
+
+        if not result.ok:
+            self.write(f"❌ Target unreachable: {result.message}")
+            return
+
+        shoulder_deg = rad2deg(result.theta1_rad) - 90  # Subtract 90 since 0 is vertical
+        elbow_deg = rad2deg(result.theta2_rad)
+
+        # Send command immediately to robot
+        speed = float(self.speed_in.value())
+
+        # Negate base and elbow for correct motor direction
+        self.driver.move_joints_deg(-base_deg, shoulder_deg, -elbow_deg, speed)
+
+        # Update visualization (dials) to match
+        self.base_dial.setValue(-int(base_deg))
+        self.shoulder_dial.setValue(-int(shoulder_deg))
+        self.elbow_dial.setValue(-int(elbow_deg))
 
     def connect_arduino(self):
         if self.connected:
